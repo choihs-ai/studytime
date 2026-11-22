@@ -260,7 +260,7 @@ function go(r) {
     if (r === 'guide') ui.guideFrom = route;
     if (r !== 'share') ui.shareKey = null;
     if (r === 'camIntro') ui.camFrom = route;
-    if (route === 'done') { if (ui.lapse && ui.lapse.url) URL.revokeObjectURL(ui.lapse.url); ui.lapse = null; }
+    if (route === 'done') ui.lapse = null;
   }
   route = r;
   render();
@@ -386,18 +386,26 @@ VIEWS.home = () => {
     <div class="bar-caption"><span>목표 ${dur(goal)} 중 ${pct}%</span><span>폰 든 횟수 ${st.upCount}</span></div>
     <p class="label">뭐 할래요?</p>
     <div class="chips">${s.subjects.map(x => `<button class="chip ${x === subj ? 'on' : ''}" data-act="pickSubj" data-arg="${esc(x)}">${esc(x)}</button>`).join('')}</div>
-    <p class="label">어떻게 잴까요?</p>
-    <div class="seg">
+    <p class="label" style="margin:20px 0 8px">어떻게 잴까요?</p>
+    <div class="seg small">
       <button data-act="pickMode" data-arg="flip" class="${db.mode !== 'camera' ? 'on' : ''}">엎어 두기</button>
       <button data-act="pickMode" data-arg="camera" class="${db.mode === 'camera' ? 'on' : ''}">세워 두기</button>
     </div>
-    <button class="btn primary" style="margin-top:16px;height:64px;font-size:18px" data-act="start">${esc(subj)} 시작</button>
+    <button class="btn primary" style="margin-top:12px;height:64px;font-size:18px" data-act="start">${esc(subj)} 시작</button>
+    ${ui.video ? `
+      <p class="label">타임랩스</p>
+      <p style="font-size:14px;margin:0;line-height:1.6">${dateLabel(ui.video.day)} ${esc(ui.video.subject || '')} 영상이 남아 있어요.</p>
+      ${videoPick}` : ''}
     ${rows.length ? `
       <p class="label">오늘 한 것</p>
       <div class="list">${rows.map(([n, v]) => `<div><span>${esc(n)}</span><span class="mono">${hms(v)}</span></div>`).join('')}</div>` : ''}
     ${rows.length || ck !== k ? `
       <button class="btn ghost" style="margin-top:20px" data-act="${closed ? 'openShare' : 'closeDay'}">${closed ? `${dayWord} 카드 보기` : `${dayWord} 마감하고 카드 만들기`}</button>` : ''}
   </div>${nav('home')}`;
+};
+
+AFTER.home = () => {
+  if (ui.video === undefined) loadVideo().then(() => { if (route === 'home' && ui.video) render(); });
 };
 
 VIEWS.timer = () => {
@@ -509,19 +517,38 @@ VIEWS.done = () => {
   </div>`;
 };
 
+// 만든 영상은 IndexedDB에 하나만 남겨 둔다. 끝 화면을 나가도 홈에서 다시 저장하거나 지울 수 있다
+function loadVideo() {
+  if (!ui.videoLoading) ui.videoLoading = lapse.getVideo()
+    .then(v => setVideo(v))
+    .catch(() => setVideo(null))
+    .finally(() => { ui.videoLoading = null; });
+  return ui.videoLoading;
+}
+function setVideo(v) {
+  if (ui.video && ui.video.url) URL.revokeObjectURL(ui.video.url);
+  if (!v) { ui.video = null; return; }
+  const blob = v.blob || new Blob([v.buf], { type: v.type || 'video/mp4' });
+  ui.video = { sessionId: v.sessionId, day: v.day, subject: v.subject, ext: v.ext, blob, url: URL.createObjectURL(blob) };
+}
+const videoPick = `<div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn primary" data-act="lapseShare">저장하거나 공유하기</button>
+      <button class="btn ghost" style="width:96px;flex:none;height:60px" data-act="videoDelete">지우기</button></div>`;
+
 function lapseBox(s) {
   if (s.mode !== 'camera') return '';
   const L = ui.lapse || {};
+  const V = ui.video && ui.video.sessionId === s.id ? ui.video : null;
   const pick = `<div style="display:flex;gap:8px">
       <button class="btn dark" data-act="lapseMake">타임랩스 만들기</button>
       <button class="btn ghost" style="width:96px;flex:none;height:60px" data-act="lapseDelete">지우기</button></div>`;
   let body;
   if (L.state === 'making') body = `<p style="font-size:15px;margin:0">영상 만드는 중 <span class="mono" id="lapsePct">${Math.round((L.pct || 0) * 100)}%</span></p>
       <p class="muted" style="font-size:13px;margin:6px 0 0">다 될 때까지 이 화면에 있어 주세요.</p>`;
-  else if (L.state === 'ready') body = `<video class="lapse-v" src="${L.url}" playsinline muted loop autoplay controls></video>
-      <button class="btn primary" style="margin-top:12px" data-act="lapseShare">저장하거나 공유하기</button>
-      <p class="muted" style="font-size:13px;margin:8px 0 0;line-height:1.6">이 화면을 나가면 영상이 사라져요. 먼저 저장해 두세요.</p>`;
+  else if (V) body = `<video class="lapse-v" src="${V.url}" playsinline muted loop autoplay controls></video>${videoPick}
+      <p class="muted" style="font-size:13px;margin:8px 0 0;line-height:1.6">지우기 전까지 홈에서도 다시 저장할 수 있어요.</p>`;
   else if (L.state === 'deleted') body = '<p class="muted" style="font-size:14px;margin:0">사진을 지웠어요.</p>';
+  else if (L.state === 'videoDeleted') body = '<p class="muted" style="font-size:14px;margin:0">영상을 지웠어요.</p>';
   else if (L.state === 'few') body = '<p class="muted" style="font-size:14px;margin:0">사진이 적어서 타임랩스를 못 만들어요.</p>';
   else if (L.state === 'fail') body = `<p style="font-size:14px;margin:0 0 12px">영상을 만들지 못했어요. 다시 눌러 보세요.</p>${pick}`;
   else if (L.n == null) body = '<p class="muted" style="font-size:14px;margin:0">사진 확인 중</p>';
@@ -532,7 +559,8 @@ AFTER.done = () => {
   const s = db.sessions.find(x => x.id === ui.lastSession);
   if (!s || s.mode !== 'camera' || ui.lapse) return;
   ui.lapse = {};
-  lapse.count().then(n => {
+  loadVideo().then(() => lapse.count()).then(n => {
+    if (ui.video && ui.video.sessionId === s.id) { if (route === 'done') render(); return; }
     if (!ui.lapse || ui.lapse.state) return;
     if (n < 8) { lapse.clear(); ui.lapse = { state: 'few' }; }
     else ui.lapse.n = n;
@@ -932,7 +960,11 @@ const ACTIONS = {
         if (el) el.textContent = Math.round(p * 100) + '%';
       });
       await lapse.clear();   // 영상을 만들면 사진은 바로 지운다
-      ui.lapse = { state: 'ready', blob: r.blob, ext: r.ext, url: URL.createObjectURL(r.blob) };
+      const v = { sessionId: s.id, day: s.day, subject: s.subject, ext: r.ext, type: r.blob.type || 'video/mp4' };
+      try { await lapse.putVideo({ ...v, buf: await r.blob.arrayBuffer() }); }
+      catch (e) { console.warn('video save', e); }   // 저장 공간이 모자라도 이번엔 화면에서 저장할 수 있다
+      setVideo({ ...v, blob: r.blob });
+      ui.lapse = { state: 'ready' };
     } catch (e) {
       console.warn('timelapse', e);
       if (e && e.message === 'few') { lapse.clear(); ui.lapse = { state: 'few' }; }
@@ -941,20 +973,27 @@ const ACTIONS = {
     if (route === 'done') render();
   },
   lapseShare: async () => {
-    const L = ui.lapse, s = db.sessions.find(x => x.id === ui.lastSession);
-    if (!L || !L.blob || !s) return;
-    const name = `eopeodwo-${s.day}.${L.ext}`;
-    const file = new File([L.blob], name, { type: L.blob.type || 'video/mp4' });
+    const V = ui.video;
+    if (!V) return;
+    const name = `eopeodwo-${V.day}.${V.ext}`;
+    const file = new File([V.blob], name, { type: V.blob.type || 'video/mp4' });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
-      else { downloadBlob(L.blob, name); toast('영상을 저장했어요'); }
+      else { downloadBlob(V.blob, name); toast('영상을 저장했어요'); }
     } catch (e) {
       if (e && e.name === 'AbortError') return;
-      downloadBlob(L.blob, name);
+      downloadBlob(V.blob, name);
       toast('공유 창을 못 열어서 파일로 저장했어요');
     }
   },
   lapseDelete: () => { lapse.clear(); ui.lapse = { state: 'deleted' }; render(); },
+  videoDelete: async () => {
+    await lapse.delVideo();
+    setVideo(null);
+    if (route === 'done') ui.lapse = { state: 'videoDeleted' };
+    toast('영상을 지웠어요');
+    render();
+  },
   toggleDrowsy: () => {
     db.settings.drowsy = !db.settings.drowsy;
     if (ui.draft) ui.draft.drowsy = db.settings.drowsy;
@@ -1005,6 +1044,7 @@ const ACTIONS = {
       return;
     }
     db = { ...blank(), settings: { ...db.settings } };
+    lapse.clear(); lapse.delVideo(); setVideo(null);   // 타임랩스 사진과 영상도 같이 지운다
     ui.resetArm = false;
     save();
     toast('기록을 지웠어요');

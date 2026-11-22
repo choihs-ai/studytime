@@ -29,23 +29,28 @@ const CAMCFG = {
   MAX_BYTES: 300 * 1024 * 1024,
 };
 
-/* ---------- 타임랩스 사진 저장소 ---------- */
+/* ---------- 타임랩스 사진·영상 저장소 ---------- */
+// frames: 세션 중 모으는 사진. video: 만든 영상 하나. 지우기를 누를 때까지 남겨 둔다
 
 const lapse = {
   _db: null,
   open() {
     if (!this._db) this._db = new Promise((res, rej) => {
-      const r = indexedDB.open('eopeodwo', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('frames', { autoIncrement: true });
+      const r = indexedDB.open('eopeodwo', 2);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains('frames')) d.createObjectStore('frames', { autoIncrement: true });
+        if (!d.objectStoreNames.contains('video')) d.createObjectStore('video');
+      };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
     return this._db;
   },
-  async run(mode, fn) {
+  async run(mode, fn, store = 'frames') {
     const d = await this.open();
     return new Promise((res, rej) => {
-      const tx = d.transaction('frames', mode), st = tx.objectStore('frames');
+      const tx = d.transaction(store, mode), st = tx.objectStore(store);
       let out;
       Promise.resolve(fn(st, v => { out = v; })).catch(rej);
       tx.oncomplete = () => res(out);
@@ -58,6 +63,9 @@ const lapse = {
   get(k) { return this.run('readonly', (st, set) => { const r = st.get(k); r.onsuccess = () => set(r.result); }); },
   del(keys) { return this.run('readwrite', st => { for (const k of keys) st.delete(k); }); },
   clear() { return this.run('readwrite', st => { st.clear(); }).catch(() => {}); },
+  putVideo(v) { return this.run('readwrite', st => { st.put(v, 'last'); }, 'video'); },
+  getVideo() { return this.run('readonly', (st, set) => { const r = st.get('last'); r.onsuccess = () => set(r.result || null); }, 'video'); },
+  delVideo() { return this.run('readwrite', st => { st.delete('last'); }, 'video').catch(() => {}); },
   async bytes() {
     return this.run('readonly', (st, set) => {
       let n = 0;
@@ -453,7 +461,8 @@ const cam = {
     renderTimerState();
   },
 
-  /* 타임랩스 사진 한 장: 세로 720px 안팎, 9:16으로 잘라서 좌우 반전 */
+  /* 타임랩스 사진 한 장: 세로 720px 안팎, 9:16으로 자른다.
+     미리보기는 거울처럼 보여 주지만 사진은 뒤집지 않는다. 책과 필기 글씨가 바로 보이게 */
   async capture(a) {
     if (this.capturing) return;
     this.capturing = true;
@@ -462,10 +471,7 @@ const cam = {
       if (!this.fc) { this.fc = document.createElement('canvas'); this.fc.width = W; this.fc.height = H; this.fx = this.fc.getContext('2d'); }
       const vw = v.videoWidth, vh = v.videoHeight, sc = Math.max(W / vw, H / vh);
       const dw = vw * sc, dh = vh * sc;
-      this.fx.save();
-      this.fx.translate(W, 0); this.fx.scale(-1, 1);
       this.fx.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh);
-      this.fx.restore();
       const blob = await new Promise(r => this.fc.toBlob(r, 'image/jpeg', 0.72));
       if (!blob || !db.active || db.active.start !== a.start) return;
       const buf = await blob.arrayBuffer();
