@@ -279,7 +279,7 @@ function settingsForm(d) {
 
 VIEWS.onboard = () => `
   <div class="screen">
-    <span class="brand">순공</span>
+    <span class="brand">엎어둬</span>
     <h1>몇 가지만 정하면<br>바로 시작해요</h1>
     ${settingsForm(draft())}
     <div style="margin-top:32px"><button class="btn dark" data-act="onboardNext">다음</button></div>
@@ -289,18 +289,18 @@ VIEWS.guide = () => {
   const sa = standalone(), ios = isIOS();
   return `
   <div class="screen">
-    <span class="brand">순공</span>
+    <span class="brand">엎어둬</span>
     <h1>폰 유혹부터<br>막고 시작해요</h1>
-    <p class="muted" style="font-size:15px;line-height:1.6;margin:12px 0 0">순공은 시간만 재요. 다른 앱은 잠글시간으로 잠그고 순공만 열어 두는 방식이에요.</p>
+    <p class="muted" style="font-size:15px;line-height:1.6;margin:12px 0 0">엎어둬는 시간만 재요. 다른 앱은 잠글시간으로 잠그고 엎어둬만 열어 두는 방식이에요.</p>
     <ol class="steps">
-      <li class="${sa ? 'done' : ''}"><b>순공을 홈 화면에 추가</b>
+      <li class="${sa ? 'done' : ''}"><b>엎어둬를 홈 화면에 추가</b>
         <span class="how">${sa ? '완료했어요.' : ios ? '사파리 아래쪽 공유 버튼을 누르고 홈 화면에 추가를 고르세요.' : '크롬 오른쪽 위 메뉴에서 홈 화면에 추가를 고르세요.'}</span></li>
       <li><b>잠글시간 설치</b>
         <span class="how">${ios ? `<a href="${LOCK_APP_URL}" target="_blank" rel="noopener">앱스토어에서 받기</a>` : '갤럭시는 설정 → 디지털 웰빙 → 집중 모드를 써도 돼요.'}</span></li>
-      <li><b>순공만 빼고 잠그기</b>
-        <span class="how">잠글시간에서 잠글 때 허용할 앱에 홈 화면의 '순공'을 넣어 두세요.</span></li>
+      <li><b>엎어둬만 빼고 잠그기</b>
+        <span class="how">잠글시간에서 잠글 때 허용할 앱에 홈 화면의 '엎어둬'를 넣어 두세요.</span></li>
       <li><b>공부할 때마다</b>
-        <span class="how">잠글시간으로 잠그기 → 순공에서 시작 → 폰을 엎어 두기. 폰을 집으면 시간이 멈춰요.</span></li>
+        <span class="how">잠글시간으로 잠그기 → 엎어둬에서 시작 → 폰을 엎어 두기. 폰을 집으면 시간이 멈춰요.</span></li>
     </ol>
     <div style="margin-top:auto;padding-top:16px"><button class="btn dark" data-act="guideDone">알겠어요</button></div>
   </div>`;
@@ -316,8 +316,8 @@ VIEWS.home = () => {
   const closed = !!db.closed[k];
   return `
   <div class="screen with-nav">
-    <div class="row"><span class="brand">순공</span><span class="date">${dateLabel(k)}${dd ? ` · <span class="mark">${esc(dd)}</span>` : ''}</span></div>
-    ${standalone() ? '' : `<button class="banner" data-act="go" data-arg="guide">홈 화면에 추가해야 잠글시간에서 순공만 뺄 수 있어요. 방법 보기</button>`}
+    <div class="row"><span class="brand">엎어둬</span><span class="date">${dateLabel(k)}${dd ? ` · <span class="mark">${esc(dd)}</span>` : ''}</span></div>
+    ${standalone() ? '' : `<button class="banner" data-act="go" data-arg="guide">홈 화면에 추가해야 잠글시간에서 엎어둬만 뺄 수 있어요. 방법 보기</button>`}
     <p class="label" style="margin-top:32px">오늘 순공</p>
     <div class="big">${hms(st.study)}</div>
     <div class="bar"><i style="width:${pct}%"></i></div>
@@ -590,7 +590,7 @@ function rng(seed) {
 
 async function drawCard(transparent) {
   const lines = receiptLines();
-  const foot = '순공 · 폰 엎어 둔 시간만 셉니다';
+  const foot = '엎어둬 · 폰을 엎어 둔 시간만 셉니다';
   await fontsReady(lines.map(x => (x.l || '') + (x.r || '')).join('') + foot + '0123456789:.%·…');
   const W = 1080, H = 1920, RW = 760, X = (W - RW) / 2, P = 60;
   const hOf = x => x.t === 'title' ? 100 : x.t === 'dash' ? 44 : x.t === 'barcode' ? 140 : 62;
@@ -752,7 +752,7 @@ const ACTIONS = {
   shareCard: async () => {
     const blob = ui.cardBlob;
     if (!blob) return toast('카드를 만드는 중이에요. 잠시 뒤에 다시 눌러 주세요.');
-    const file = new File([blob], `sungong-${dayKey()}.png`, { type: 'image/png' });
+    const file = new File([blob], `eopeodwo-${dayKey()}.png`, { type: 'image/png' });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
       else { downloadBlob(blob, file.name); toast('이미지를 저장했어요. 인스타에서 불러와 주세요.'); }

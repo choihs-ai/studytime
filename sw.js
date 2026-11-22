@@ -1,5 +1,5 @@
 // 앱 파일은 네트워크 우선(새 버전이 바로 반영되게), 글꼴은 캐시 우선
-const CACHE = 'sungong-v1';
+const CACHE = 'eopeodwo-v2';
 const CORE = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
 self.addEventListener('install', e => {

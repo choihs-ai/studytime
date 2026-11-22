@@ -1,7 +1,7 @@
 {
-  "name": "순공",
-  "short_name": "순공",
-  "description": "폰 엎어 둔 시간만 세는 순공 타이머",
+  "name": "엎어둬",
+  "short_name": "엎어둬",
+  "description": "폰을 엎어 둔 시간만 세는 순공 타이머",
   "lang": "ko",
   "start_url": "./",
   "scope": "./",
