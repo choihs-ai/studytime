@@ -1,7 +1,7 @@
 'use strict';
 
 const KEY = 'sungong.v1';
-const CUTOFF_H = 4;            // 새벽 4시 전까지는 전날 공부로 친다
+const CUTOFF_H = 0;            // 날짜는 자정에 바뀐다. 세션은 시작한 날에 통째로 들어간다
 const AWAY_MIN_MS = 3000;      // 이보다 짧게 나갔다 오면 묻지 않는다
 const SUBJECT_PRESET = ['국어', '수학', '영어', '한국사', '통합사회', '통합과학', '물리학', '화학', '생명과학', '지구과학'];
 const REASONS = [
@@ -12,6 +12,15 @@ const REASON_NAME = Object.fromEntries(REASONS);
 const GRADES = ['고1', '고2', '고3'];
 const LOCK_APP_URL = 'https://apps.apple.com/kr/app/id6504188981';
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
+
+/* ---------- 시간·날짜 ---------- */
+
+const pad = n => String(n).padStart(2, '0');
+const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const parseKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const dayKey = (ts = Date.now()) => keyOf(new Date(ts - CUTOFF_H * 3600000));
+const dayStart = k => { const d = parseKey(k); d.setHours(CUTOFF_H); return d.getTime(); };
+const shiftKey = (k, n) => { const d = parseKey(k); d.setDate(d.getDate() + n); return keyOf(d); };
 
 /* ---------- 저장 ---------- */
 
@@ -31,10 +40,22 @@ function load() {
     if (raw) {
       const d = JSON.parse(raw);
       const b = blank();
-      return { ...b, ...d, settings: { ...b.settings, ...(d.settings || {}) } };
+      return migrate({ ...b, ...d, settings: { ...b.settings, ...(d.settings || {}) } });
     }
   } catch (e) { /* 읽기 실패하면 새로 시작 */ }
   return blank();
+}
+
+// 세션 날짜를 시작 시각 기준으로 다시 계산한다. 하루 기준이 바뀌어도 기록이 맞게 붙는다.
+// 마감 표시는 세션이 하나도 남지 않은 날에서만 지운다.
+function migrate(d) {
+  if (!Array.isArray(d.sessions)) d.sessions = [];
+  for (const s of d.sessions) if (s && s.start) s.day = dayKey(s.start);
+  const days = new Set(d.sessions.map(s => s.day));
+  const closed = {};
+  for (const k of Object.keys(d.closed || {})) if (d.closed[k] && days.has(k)) closed[k] = true;
+  d.closed = closed;
+  return d;
 }
 
 let db = load();
@@ -44,14 +65,6 @@ function save() {
   catch (e) { toast('기록을 저장하지 못했어요. 폰 저장 공간을 확인해 주세요.'); }
 }
 
-/* ---------- 시간·날짜 ---------- */
-
-const pad = n => String(n).padStart(2, '0');
-const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-const parseKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
-const dayKey = (ts = Date.now()) => keyOf(new Date(ts - CUTOFF_H * 3600000));
-const dayStart = k => { const d = parseKey(k); d.setHours(CUTOFF_H); return d.getTime(); };
-const shiftKey = (k, n) => { const d = parseKey(k); d.setDate(d.getDate() + n); return keyOf(d); };
 
 function hms(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -62,7 +75,7 @@ function hm(ms) {
   return Math.floor(m / 60) + ':' + pad(m % 60);
 }
 function dur(ms) {
-  if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + '초';
+  if (ms < 60000) return (ms > 0 ? Math.max(1, Math.round(ms / 1000)) : 0) + '초';
   const m = Math.round(ms / 60000);
   if (m < 60) return m + '분';
   const h = Math.floor(m / 60), r = m % 60;
@@ -72,10 +85,10 @@ const clock = ts => { const d = new Date(ts); return pad(d.getHours()) + ':' + p
 const dateLabel = k => { const d = parseKey(k); return `${d.getMonth() + 1}월 ${d.getDate()}일 ${WD[d.getDay()]}요일`; };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function ddayText() {
+function ddayText(k = dayKey()) {
   const s = db.settings;
   if (!s.examDate) return '';
-  const n = Math.round((parseKey(s.examDate) - parseKey(dayKey())) / 86400000);
+  const n = Math.round((parseKey(s.examDate) - parseKey(k)) / 86400000);
   const name = s.examName || '시험';
   if (n > 0) return `${name} D-${n}`;
   if (n === 0) return `${name} D-DAY`;
@@ -96,6 +109,17 @@ function dayStats(k) {
     st.bySubject[s.subject] = (st.bySubject[s.subject] || 0) + s.study;
   }
   return st;
+}
+
+// 마감할 날: 오늘 기록이 없고 마지막 세션이 어제 것이면 어제를 마감한다.
+// 밤 11시에 시작해서 0시 반에 끝낸 날도 카드가 비지 않게 하려는 것.
+function closeKey() {
+  const k = dayKey();
+  if (db.sessions.some(s => s.day === k)) return k;
+  let last = null;
+  for (const s of db.sessions) if (!last || s.start > last.start) last = s;
+  const y = shiftKey(k, -1);
+  return last && last.day === y ? y : k;
 }
 
 function currentSubject() {
@@ -133,7 +157,7 @@ function requestSensor() {
   };
   if (typeof D.requestPermission === 'function') {
     return D.requestPermission()
-      .then(r => { if (r === 'granted') attach(); else sensor.mode = 'off'; })
+      .then(r => { if (r !== 'denied') attach(); else sensor.mode = 'off'; })   // 크롬은 'prompt'를 돌려주기도 한다
       .catch(() => { sensor.mode = 'off'; });
   }
   attach();
@@ -222,6 +246,7 @@ function go(r) {
     ui.resetArm = false;
     if (r === 'records') ui.recKey = null;
     if (r === 'guide') ui.guideFrom = route;
+    if (r !== 'share') ui.shareKey = null;
   }
   route = r;
   render();
@@ -313,7 +338,8 @@ VIEWS.home = () => {
   const subj = currentSubject();
   const rows = Object.entries(st.bySubject).sort((a, b) => b[1] - a[1]);
   const dd = ddayText();
-  const closed = !!db.closed[k];
+  const ck = closeKey(), closed = !!db.closed[ck];
+  const dayWord = ck === k ? '오늘' : '어제';
   return `
   <div class="screen with-nav">
     <div class="row"><span class="brand">엎어둬</span><span class="date">${dateLabel(k)}${dd ? ` · <span class="mark">${esc(dd)}</span>` : ''}</span></div>
@@ -327,8 +353,9 @@ VIEWS.home = () => {
     <button class="btn primary" style="margin-top:24px;height:64px;font-size:18px" data-act="start">${esc(subj)} 시작</button>
     ${rows.length ? `
       <p class="label">오늘 한 것</p>
-      <div class="list">${rows.map(([n, v]) => `<div><span>${esc(n)}</span><span class="mono">${hms(v)}</span></div>`).join('')}</div>
-      <button class="btn ghost" style="margin-top:20px" data-act="${closed ? 'openShare' : 'closeDay'}">${closed ? '오늘 카드 보기' : '오늘 마감하고 카드 만들기'}</button>` : ''}
+      <div class="list">${rows.map(([n, v]) => `<div><span>${esc(n)}</span><span class="mono">${hms(v)}</span></div>`).join('')}</div>` : ''}
+    ${rows.length || ck !== k ? `
+      <button class="btn ghost" style="margin-top:20px" data-act="${closed ? 'openShare' : 'closeDay'}">${closed ? `${dayWord} 카드 보기` : `${dayWord} 마감하고 카드 만들기`}</button>` : ''}
   </div>${nav('home')}`;
 };
 
@@ -404,7 +431,7 @@ VIEWS.done = () => {
     <p style="margin:10px 0 0;font-size:15px;line-height:1.6">${left > 0 ? `목표까지 <span class="mono">${hms(left)}</span> 남았어요.` : '오늘 목표를 채웠어요.'}</p>
     <div style="margin-top:auto;padding-top:28px;display:flex;flex-direction:column;gap:10px">
       <button class="btn primary" data-act="go" data-arg="home">이어서 공부하기</button>
-      <button class="btn ghost" data-act="closeDay">오늘 마감하고 카드 만들기</button>
+      <button class="btn ghost" data-act="closeDay">${closeKey() === dayKey() ? '오늘' : '어제'} 마감하고 카드 만들기</button>
     </div>
   </div>`;
 };
@@ -443,7 +470,7 @@ function recDay() {
   ${st.list.length ? `
     <p class="label">언제 했나</p>
     <div class="timeline">${blocks}</div>
-    <div class="ticks"><span>04</span><span>10</span><span>16</span><span>22</span><span>04</span></div>
+    <div class="ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
     <p class="label">과목별</p>
     ${subj.map(([n, v]) => `<div class="subj"><span>${esc(n)}</span><i style="width:${Math.max(4, v / max * 100).toFixed(0)}%"></i><span>${hms(v)}</span></div>`).join('')}
     <p class="label">세션</p>
@@ -501,16 +528,19 @@ VIEWS.settings = () => {
     <button class="btn ghost" data-act="go" data-arg="guide">잠글시간 설정 방법 다시 보기</button>
     <p class="label">기록</p>
     <button class="btn ghost danger" data-act="resetAll">${ui.resetArm ? '한 번 더 누르면 전부 지워져요' : '기록 전부 지우기'}</button>
-    <p class="muted" style="font-size:12px;line-height:1.6;margin:16px 0 0">가입 없이 써요. 기록은 이 폰 안에만 저장되고 어디로도 보내지 않아요. 하루는 새벽 4시에 넘어가요.</p>
+    <p class="muted" style="font-size:12px;line-height:1.6;margin:16px 0 0">가입 없이 써요. 기록은 이 폰 안에만 저장되고 어디로도 보내지 않아요. 밤 12시를 넘겨도 끊지 않고 이어서 한 공부는 시작한 날로 쳐요.</p>
   </div>${nav('settings')}`;
 };
 
+const shareKey = () => ui.shareKey || closeKey();
+
 VIEWS.share = () => {
-  if (!db.closed[dayKey()]) return VIEWS.home();
+  const k = shareKey();
+  if (!db.closed[k]) return VIEWS.home();
   const s = db.settings;
   return `
   <div class="screen">
-    <div class="row" style="align-items:center"><h2>오늘 카드</h2><button class="textbtn" data-act="reopen">마감 풀고 더 하기</button></div>
+    <div class="row" style="align-items:center"><h2>${k === dayKey() ? '오늘' : '어제'} 카드</h2><button class="textbtn" data-act="reopen">마감 풀고 더 하기</button></div>
     <div class="preview" id="preview"><span class="muted" style="font-size:13px">만드는 중</span></div>
     <div class="row" style="align-items:center;margin-top:16px;min-height:44px">
       <span style="font-size:15px">닉네임 보이기</span>
@@ -539,8 +569,8 @@ AFTER.share = () => {
 
 /* ---------- 영수증 카드 ---------- */
 
-function receiptLines() {
-  const k = dayKey(), st = dayStats(k), s = db.settings;
+function receiptLines(k) {
+  const st = dayStats(k), s = db.settings;
   const goal = s.goalMin * 60000;
   const dayNo = new Set(db.sessions.filter(x => x.day <= k).map(x => x.day)).size;
   const d = parseKey(k);
@@ -549,7 +579,7 @@ function receiptLines() {
   const lines = [
     { t: 'title', l: '순공 영수증' },
     { l: `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${WD[d.getDay()]}`, r: 'No.' + String(dayNo).padStart(4, '0'), muted: true },
-    { l: who, r: ddayText(), muted: true },
+    { l: who, r: ddayText(k), muted: true },
     { t: 'dash' },
     ...Object.entries(st.bySubject).sort((a, b) => b[1] - a[1]).slice(0, 7).map(([n, v]) => ({ l: cut(n), r: hms(v) })),
     { t: 'dash' },
@@ -589,7 +619,7 @@ function rng(seed) {
 }
 
 async function drawCard(transparent) {
-  const lines = receiptLines();
+  const lines = receiptLines(shareKey());
   const foot = '엎어둬 · 폰을 엎어 둔 시간만 셉니다';
   await fontsReady(lines.map(x => (x.l || '') + (x.r || '')).join('') + foot + '0123456789:.%·…');
   const W = 1080, H = 1920, RW = 760, X = (W - RW) / 2, P = 60;
@@ -745,14 +775,14 @@ const ACTIONS = {
     save();
     render();
   },
-  closeDay: () => { db.closed[dayKey()] = true; save(); go('share'); },
-  openShare: () => go('share'),
-  reopen: () => { delete db.closed[dayKey()]; save(); go('home'); },
+  closeDay: () => { const k = closeKey(); db.closed[k] = true; ui.shareKey = k; save(); go('share'); },
+  openShare: () => { ui.shareKey = closeKey(); go('share'); },
+  reopen: () => { delete db.closed[shareKey()]; ui.shareKey = null; save(); go('home'); },
   toggleNick: () => { db.settings.showNick = !db.settings.showNick; save(); render(); },
   shareCard: async () => {
     const blob = ui.cardBlob;
     if (!blob) return toast('카드를 만드는 중이에요. 잠시 뒤에 다시 눌러 주세요.');
-    const file = new File([blob], `eopeodwo-${dayKey()}.png`, { type: 'image/png' });
+    const file = new File([blob], `eopeodwo-${shareKey()}.png`, { type: 'image/png' });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
       else { downloadBlob(blob, file.name); toast('이미지를 저장했어요. 인스타에서 불러와 주세요.'); }
@@ -823,6 +853,7 @@ app.addEventListener('keydown', e => {
 /* ---------- 시작 ---------- */
 
 (function boot() {
+  if (db.settings.onboarded) save();   // 다시 계산한 세션 날짜를 저장해 둔다
   if (!db.settings.onboarded) route = 'onboard';
   else if (db.active) {
     // 공부 중에 앱이 꺼졌다가 다시 열린 경우
