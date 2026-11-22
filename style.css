@@ -127,3 +127,15 @@ body.in-timer{background:var(--night)}
 .timer.nosensor.counting{background:var(--night)}
 .timer.nosensor.counting .clock .big{color:var(--paper)}
 .timer.nosensor.counting .msg,.timer.nosensor.counting .actions{opacity:1}
+
+/* 세워 두기 */
+.campv{position:fixed;top:calc(env(safe-area-inset-top) + 64px);right:max(16px, calc((100vw - 480px) / 2 + 16px));width:92px;z-index:10;display:none;flex-direction:column;gap:6px;align-items:center;transition:opacity .4s}
+.campv.on{display:flex}
+.campv.dim{opacity:.55}
+.campv video{width:92px;height:122px;object-fit:cover;transform:scaleX(-1);border:1px solid var(--night-line);border-radius:4px;background:#000}
+.campv span{font-size:12px;color:var(--night-muted);text-align:center;white-space:nowrap}
+.timer.cam .clock{margin-top:calc(22vh + 48px)}
+.timer.cam.counting{background:var(--night)}
+.timer.cam.counting .clock .big{color:var(--paper)}
+.timer.cam.counting .msg,.timer.cam.counting .actions{opacity:.6}
+.lapse-v{display:block;width:min(200px,52vw);aspect-ratio:9/16;object-fit:cover;background:#000;border:1px solid var(--ink)}

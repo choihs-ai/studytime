@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- 카메라 영상과 사진은 어디로도 보내지 않는다. 외부로 나가는 요청은 구글 폰트만 허용 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self'; base-uri 'self'; form-action 'none'">
 <title>엎어둬</title>
 <meta name="description" content="폰을 엎어 둔 시간만 세는 순공 타이머">
 <meta name="theme-color" content="#F6F3EC">
@@ -20,6 +22,7 @@
 </head>
 <body>
 <div id="app"></div>
+<script src="camera.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

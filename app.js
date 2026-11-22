@@ -28,9 +28,9 @@ function blank() {
   return {
     settings: {
       grade: '고2', subjects: ['국어', '수학', '영어'], goalMin: 360,
-      examName: '', examDate: '', nickname: '', showNick: true, onboarded: false,
+      examName: '', examDate: '', nickname: '', showNick: true, onboarded: false, drowsy: false,
     },
-    sessions: [], closed: {}, active: null, lastSubject: null,
+    sessions: [], closed: {}, active: null, lastSubject: null, mode: 'flip', camIntroSeen: false,
   };
 }
 
@@ -102,9 +102,15 @@ const standalone = () => navigator.standalone === true || matchMedia('(display-m
 
 function dayStats(k) {
   const list = db.sessions.filter(s => s.day === k);
-  const st = { study: 0, brk: 0, up: 0, upCount: 0, awayCount: 0, awayMs: 0, bySubject: {}, list };
+  const st = { study: 0, brk: 0, up: 0, upCount: 0, awayCount: 0, awayMs: 0, bySubject: {}, list,
+    absentCount: 0, absentMs: 0, drowsyCount: 0, drowsyMs: 0, camStudy: 0, cam: false };
   for (const s of list) {
     st.study += s.study; st.brk += s.brk; st.up += s.up; st.upCount += s.upCount;
+    if (s.mode === 'camera') {
+      st.cam = true; st.camStudy += s.study;
+      st.absentCount += s.absentCount || 0; st.absentMs += s.absentMs || 0;
+      st.drowsyCount += s.drowsyCount || 0; st.drowsyMs += s.drowsyMs || 0;
+    }
     for (const a of s.away) { st.awayCount++; st.awayMs += a.ms; }
     st.bySubject[s.subject] = (st.bySubject[s.subject] || 0) + s.study;
   }
@@ -135,6 +141,7 @@ const sensor = { mode: 'unknown', faceDown: false, lastEvent: 0, listening: fals
 function onOrient(e) {
   if (e.beta == null) return;
   sensor.lastEvent = Date.now();
+  if (db.active && db.active.mode === 'camera') { sensor.mode = 'on'; cam.onOrient(e); return; }
   const b = Math.abs(e.beta), g = Math.abs(e.gamma || 0);
   // 엎을 때와 들 때 기준을 다르게 둬서 책상 진동에 깜빡이지 않게 한다
   const down = sensor.faceDown ? (b > 120 && g < 50) : (b > 150 && g < 35);
@@ -197,12 +204,15 @@ const engine = {
     if (a.state === 'counting') a.study += dt;
     else if (a.state === 'up') a.up += dt;
     else if (a.state === 'break') a.brk += dt;
+    else if (a.state === 'absent') a.absentMs = (a.absentMs || 0) + dt;
+    else if (a.state === 'drowsy') a.drowsyMs = (a.drowsyMs || 0) + dt;
     if (now - a.savedAt > 5000) { a.savedAt = now; save(); }
     updateTimer();
   },
   decide() {
     const a = db.active;
     if (!a || a.state === 'break') return;
+    if (a.mode === 'camera') return cam.decide(a);
     const counting = sensor.mode === 'on' ? sensor.faceDown : sensor.mode === 'off';
     if (counting && a.state !== 'counting') { a.state = 'counting'; renderTimerState(); }
     else if (!counting && a.state === 'counting') { a.state = 'up'; a.upCount++; renderTimerState(); }
@@ -219,6 +229,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     engine.tick();
     a.awayAt = Date.now();
+    if (a.mode === 'camera') cam.pause();
     save();
   } else {
     const now = Date.now();
@@ -227,6 +238,7 @@ document.addEventListener('visibilitychange', () => {
     a.awayAt = 0;
     save();
     wake.on();
+    if (a.mode === 'camera') cam.wake();
     if (route === 'timer') render();
   }
 });
@@ -247,6 +259,8 @@ function go(r) {
     if (r === 'records') ui.recKey = null;
     if (r === 'guide') ui.guideFrom = route;
     if (r !== 'share') ui.shareKey = null;
+    if (r === 'camIntro') ui.camFrom = route;
+    if (route === 'done') { if (ui.lapse && ui.lapse.url) URL.revokeObjectURL(ui.lapse.url); ui.lapse = null; }
   }
   route = r;
   render();
@@ -257,6 +271,7 @@ function render() {
   document.body.className = '';
   app.innerHTML = (VIEWS[route] || VIEWS.home)();
   if (AFTER[route]) AFTER[route]();
+  cam.syncPreview();
 }
 
 let toastTimer;
@@ -331,6 +346,27 @@ VIEWS.guide = () => {
   </div>`;
 };
 
+VIEWS.camIntro = () => `
+  <div class="screen">
+    <span class="brand">엎어둬</span>
+    <h1>세워 두고<br>얼굴로 재요</h1>
+    <p class="muted" style="font-size:15px;line-height:1.6;margin:12px 0 0">전면 카메라에 얼굴이 보이는 시간만 순공으로 세요.</p>
+    <ol class="steps">
+      <li><b>거치대에 세워 두기</b>
+        <span class="how">얼굴이 화면에 들어오게 폰을 세워 두세요. 20초 넘게 자리를 비우면 멈춰요.</span></li>
+      <li><b>충전기 꽂기</b>
+        <span class="how">카메라를 계속 켜 두니까 배터리가 빨리 닳아요. 충전기를 꽂아 두면 좋아요.</span></li>
+      <li><b>영상은 폰 밖으로 안 나가요</b>
+        <span class="how">얼굴이 있는지만 폰 안에서 확인해요. 어디로도 보내지 않아요.</span></li>
+      <li><b>타임랩스</b>
+        <span class="how">공부하는 동안 작은 사진을 폰에 모아요. 끝나면 영상으로 만들거나 바로 지울 수 있어요.</span></li>
+    </ol>
+    <div style="margin-top:auto;padding-top:16px;display:flex;flex-direction:column;gap:8px">
+      <button class="btn dark" data-act="camIntroOk">세워 두기로 할게요</button>
+      <button class="textbtn" style="align-self:center" data-act="camIntroNo">엎어 두기로 할게요</button>
+    </div>
+  </div>`;
+
 VIEWS.home = () => {
   const k = dayKey(), st = dayStats(k), s = db.settings;
   const goal = s.goalMin * 60000;
@@ -350,7 +386,12 @@ VIEWS.home = () => {
     <div class="bar-caption"><span>목표 ${dur(goal)} 중 ${pct}%</span><span>폰 든 횟수 ${st.upCount}</span></div>
     <p class="label">뭐 할래요?</p>
     <div class="chips">${s.subjects.map(x => `<button class="chip ${x === subj ? 'on' : ''}" data-act="pickSubj" data-arg="${esc(x)}">${esc(x)}</button>`).join('')}</div>
-    <button class="btn primary" style="margin-top:24px;height:64px;font-size:18px" data-act="start">${esc(subj)} 시작</button>
+    <p class="label">어떻게 잴까요?</p>
+    <div class="seg">
+      <button data-act="pickMode" data-arg="flip" class="${db.mode !== 'camera' ? 'on' : ''}">엎어 두기</button>
+      <button data-act="pickMode" data-arg="camera" class="${db.mode === 'camera' ? 'on' : ''}">세워 두기</button>
+    </div>
+    <button class="btn primary" style="margin-top:16px;height:64px;font-size:18px" data-act="start">${esc(subj)} 시작</button>
     ${rows.length ? `
       <p class="label">오늘 한 것</p>
       <div class="list">${rows.map(([n, v]) => `<div><span>${esc(n)}</span><span class="mono">${hms(v)}</span></div>`).join('')}</div>` : ''}
@@ -382,6 +423,7 @@ AFTER.timer = () => { renderTimerState(); updateTimer(); };
 function renderTimerState() {
   const a = db.active, w = document.getElementById('timerWrap');
   if (!a || !w) return;
+  if (a.mode === 'camera') return renderCamState(a, w);
   w.className = 'timer' + (a.state === 'counting' ? ' counting' : '') + (sensor.mode === 'off' ? ' nosensor' : '');
   const label = { waiting: '시작 대기', counting: `${a.subject} 공부 중`, up: '멈춤', break: '쉬는 중' }[a.state] || '';
   document.getElementById('tState').innerHTML = `<span class="dot"></span>${esc(label)}`;
@@ -402,11 +444,39 @@ function renderTimerState() {
     : `<button class="btn ghost" data-act="breakOn">잠깐 쉬기</button>` + end;
 }
 
+function renderCamState(a, w) {
+  w.className = 'timer cam' + (a.state === 'counting' ? ' counting' : '');
+  const label = { waiting: '시작 대기', counting: `${a.subject} 공부 중`, up: '멈춤', absent: '자리 비움', drowsy: '졸음', break: '쉬는 중' }[a.state] || '';
+  document.getElementById('tState').innerHTML = `<span class="dot"></span>${esc(label)}`;
+  const st = cam.status;
+  let msg;
+  if (st === 'off') msg = '앱을 다시 열었어요. 이어서 재려면 <b>계속하기</b>를 눌러 주세요.';
+  else if (st === 'starting') msg = '카메라를 켜는 중이에요.';
+  else if (st === 'error') msg = (cam.errKind === 'model' ? '얼굴 인식을 불러오지 못했어요.' : cam.errKind === 'perm' ? '카메라 권한이 없어요.' : '카메라를 켜지 못했어요.')
+    + ' <b>엎어 두기</b>로 바꿔서 재 주세요.';
+  else if (a.state === 'break') msg = '쉬는 시간은 순공에 안 들어가요. 다 쉬면 <b>다시 공부</b>를 눌러요.';
+  else if (a.state === 'up') msg = '폰이 움직여서 멈췄어요. 다시 세워 두면 이어서 재요.';
+  else if (a.state === 'absent') msg = '자리를 비워서 멈췄어요. 돌아오면 이어서 재요.';
+  else if (a.state === 'drowsy') msg = '눈을 오래 감고 있어서 멈췄어요. 눈을 뜨면 이어서 재요.';
+  else if (a.state === 'waiting') msg = '얼굴이 화면에 들어오게 폰을 <b>세워 두면</b> 시작돼요.';
+  else msg = '재는 중이에요. 폰은 그대로 두세요.';
+  if (!('wakeLock' in navigator) && st === 'on') msg += '<br><span style="font-size:13px">화면이 꺼지면 멈춰요. 자동 잠금 시간을 길게 바꿔 두세요.</span>';
+  document.getElementById('tMsg').innerHTML = msg;
+  const end = `<button class="btn ${a.state === 'break' || st === 'off' || st === 'error' ? 'ghost' : 'primary'}" data-act="endSession">끝내기</button>`;
+  document.getElementById('tActions').innerHTML =
+    st === 'off' ? end + `<button class="btn primary" data-act="resume">계속하기</button>`
+    : st === 'error' ? end + `<button class="btn primary" data-act="toFlip">엎어 두기로 바꾸기</button>`
+    : a.state === 'break' ? end + `<button class="btn primary" data-act="unbreak">다시 공부</button>`
+    : `<button class="btn ghost" data-act="breakOn">잠깐 쉬기</button>` + end;
+  cam.syncPreview();
+}
+
 function updateTimer() {
   const a = db.active, m = document.getElementById('tMain');
   if (!a || !m) return;
   m.textContent = hms(a.study);
-  document.getElementById('tSub').textContent = `이번 세션 · 쉰 시간 ${hm(a.brk)} · 폰 든 횟수 ${a.upCount}`;
+  document.getElementById('tSub').textContent = `이번 세션 · 쉰 시간 ${hm(a.brk)} · 폰 든 횟수 ${a.upCount}`
+    + (a.mode === 'camera' ? ` · 자리 비움 ${a.absentCount || 0}` + (a.drowsyCount ? ` · 졸음 ${a.drowsyCount}` : '') : '');
   document.getElementById('tToday').textContent = hms(dayStats(dayKey(a.start)).study + a.study);
 }
 
@@ -423,8 +493,11 @@ VIEWS.done = () => {
     <div class="list" style="margin-top:28px;border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink)">
       <div><span>쉰 시간</span><span class="mono">${hms(s.brk)}</span></div>
       <div><span>폰 든 횟수</span><span class="mono">${s.upCount}번 · ${dur(s.up)}</span></div>
+      ${s.mode === 'camera' ? `<div><span>자리 비움</span><span class="mono">${s.absentCount || 0}번 · ${dur(s.absentMs || 0)}</span></div>` : ''}
+      ${s.drowsyCount ? `<div><span>졸음</span><span class="mono">${s.drowsyCount}번 · ${dur(s.drowsyMs || 0)}</span></div>` : ''}
       <div><span>앱 나간 횟수</span><span class="mono">${s.away.length}번 · ${dur(awayMs)}</span></div>
     </div>
+    ${lapseBox(s)}
     ${s.sensor ? '' : '<p class="muted" style="font-size:13px;margin:10px 0 0">이번 세션은 센서 없이 화면이 켜진 시간으로 쟀어요.</p>'}
     <p class="label" style="margin-top:32px">오늘 순공</p>
     <div class="mono" style="font-size:36px;font-weight:500;letter-spacing:-.03em"><span class="mark" style="padding:0 6px">${hms(st.study)}</span></div>
@@ -434,6 +507,37 @@ VIEWS.done = () => {
       <button class="btn ghost" data-act="closeDay">${closeKey() === dayKey() ? '오늘' : '어제'} 마감하고 카드 만들기</button>
     </div>
   </div>`;
+};
+
+function lapseBox(s) {
+  if (s.mode !== 'camera') return '';
+  const L = ui.lapse || {};
+  const pick = `<div style="display:flex;gap:8px">
+      <button class="btn dark" data-act="lapseMake">타임랩스 만들기</button>
+      <button class="btn ghost" style="width:96px;flex:none;height:60px" data-act="lapseDelete">지우기</button></div>`;
+  let body;
+  if (L.state === 'making') body = `<p style="font-size:15px;margin:0">영상 만드는 중 <span class="mono" id="lapsePct">${Math.round((L.pct || 0) * 100)}%</span></p>
+      <p class="muted" style="font-size:13px;margin:6px 0 0">다 될 때까지 이 화면에 있어 주세요.</p>`;
+  else if (L.state === 'ready') body = `<video class="lapse-v" src="${L.url}" playsinline muted loop autoplay controls></video>
+      <button class="btn primary" style="margin-top:12px" data-act="lapseShare">저장하거나 공유하기</button>
+      <p class="muted" style="font-size:13px;margin:8px 0 0;line-height:1.6">이 화면을 나가면 영상이 사라져요. 먼저 저장해 두세요.</p>`;
+  else if (L.state === 'deleted') body = '<p class="muted" style="font-size:14px;margin:0">사진을 지웠어요.</p>';
+  else if (L.state === 'few') body = '<p class="muted" style="font-size:14px;margin:0">사진이 적어서 타임랩스를 못 만들어요.</p>';
+  else if (L.state === 'fail') body = `<p style="font-size:14px;margin:0 0 12px">영상을 만들지 못했어요. 다시 눌러 보세요.</p>${pick}`;
+  else if (L.n == null) body = '<p class="muted" style="font-size:14px;margin:0">사진 확인 중</p>';
+  else body = `<p style="font-size:14px;margin:0 0 12px;line-height:1.6">사진 ${L.n}장으로 ${Math.round(lapsePlan(L.n).T)}초쯤 되는 영상을 만들어요.</p>${pick}`;
+  return `<p class="label">타임랩스</p><div>${body}</div>`;
+}
+AFTER.done = () => {
+  const s = db.sessions.find(x => x.id === ui.lastSession);
+  if (!s || s.mode !== 'camera' || ui.lapse) return;
+  ui.lapse = {};
+  lapse.count().then(n => {
+    if (!ui.lapse || ui.lapse.state) return;
+    if (n < 8) { lapse.clear(); ui.lapse = { state: 'few' }; }
+    else ui.lapse.n = n;
+    if (route === 'done') render();
+  }).catch(() => { ui.lapse = { state: 'few' }; if (route === 'done') render(); });
 };
 
 VIEWS.records = () => {
@@ -476,7 +580,7 @@ function recDay() {
     <p class="label">세션</p>
     <div class="list">${st.list.slice().reverse().map(s => `
       <div><span><span class="mono" style="font-size:12px;color:var(--muted)">${clock(s.start)}–${clock(s.end)}</span>&nbsp; ${esc(s.subject)}<br>
-        <span class="sub">폰 든 ${s.upCount}번 · 나간 ${s.away.length}번${s.sensor ? '' : ' · 화면 기준'}</span></span>
+        <span class="sub">폰 든 ${s.upCount}번${s.mode === 'camera' ? ` · 자리 비움 ${s.absentCount || 0}번${s.drowsyCount ? ` · 졸음 ${s.drowsyCount}번` : ''}` : ''} · 나간 ${s.away.length}번${s.sensor ? '' : ' · 화면 기준'}</span></span>
         <span class="mono">${hms(s.study)}</span></div>`).join('')}</div>`
   : `<p class="muted" style="margin-top:48px;text-align:center;font-size:15px">이날은 기록이 없어요.</p>`}`;
 }
@@ -490,9 +594,9 @@ function recWeek() {
   const total = stats.reduce((t, s) => t + s.study, 0);
   const studied = stats.filter(s => s.study > 0).length;
   const lure = {};
-  let upCount = 0;
+  let upCount = 0, absentCount = 0, hasCam = false;
   stats.forEach(s => {
-    upCount += s.upCount;
+    upCount += s.upCount; absentCount += s.absentCount; hasCam = hasCam || s.cam;
     s.list.forEach(x => x.away.forEach(a => {
       const r = lure[a.reason] || (lure[a.reason] = { ms: 0, n: 0 });
       r.ms += a.ms; r.n++;
@@ -512,7 +616,7 @@ function recWeek() {
   ${lr.length
     ? `<div class="lure">${lr.map(([k, v]) => `<div><span>${esc(REASON_NAME[k] || '기타')}</span><i style="width:${Math.max(4, v.ms / lmax * 100).toFixed(0)}%"></i><span class="mono">${dur(v.ms)} · ${v.n}번</span></div>`).join('')}</div>`
     : `<p class="muted" style="font-size:14px;margin:0">이번 주는 공부하다 앱을 나간 적이 없어요.</p>`}
-  <p style="font-size:14px;margin:16px 0 0">공부하다 폰을 든 횟수 <span class="mono">${upCount}번</span></p>`;
+  <p style="font-size:14px;margin:16px 0 0">공부하다 폰을 든 횟수 <span class="mono">${upCount}번</span>${hasCam ? ` · 자리 비움 <span class="mono">${absentCount}번</span>` : ''}</p>`;
 }
 
 VIEWS.settings = () => {
@@ -526,6 +630,13 @@ VIEWS.settings = () => {
     <button class="btn dark" style="margin-top:24px" data-act="saveSettings">저장</button>
     <p class="label" style="margin-top:36px">유혹 막기</p>
     <button class="btn ghost" data-act="go" data-arg="guide">잠글시간 설정 방법 다시 보기</button>
+    <p class="label">세워 두기</p>
+    <div class="row" style="align-items:center;min-height:44px">
+      <span style="font-size:15px">졸면 멈추기 <span class="muted" style="font-size:13px">· 실험 기능</span></span>
+      <button class="switch ${db.settings.drowsy ? 'on' : ''}" aria-label="졸면 멈추기" aria-pressed="${!!db.settings.drowsy}" data-act="toggleDrowsy"><span></span></button>
+    </div>
+    <p class="muted" style="font-size:13px;margin:4px 0 12px;line-height:1.6">눈을 10초 넘게 감고 있으면 멈추고 졸음으로 따로 적어요. 고개를 숙이고 있을 때는 판정하지 않아요.</p>
+    <button class="btn ghost" data-act="go" data-arg="camIntro">세워 두기 안내 다시 보기</button>
     <p class="label">기록</p>
     <button class="btn ghost danger" data-act="resetAll">${ui.resetArm ? '한 번 더 누르면 전부 지워져요' : '기록 전부 지우기'}</button>
     <p class="muted" style="font-size:12px;line-height:1.6;margin:16px 0 0">가입 없이 써요. 기록은 이 폰 안에만 저장되고 어디로도 보내지 않아요. 밤 12시를 넘겨도 끊지 않고 이어서 한 공부는 시작한 날로 쳐요.</p>
@@ -584,6 +695,7 @@ function receiptLines(k) {
     ...Object.entries(st.bySubject).sort((a, b) => b[1] - a[1]).slice(0, 7).map(([n, v]) => ({ l: cut(n), r: hms(v) })),
     { t: 'dash' },
     { l: '순공 합계', r: hms(st.study), bold: true, hl: true },
+    ...(st.camStudy > 0 ? [{ l: '카메라로 잰 시간', r: hms(st.camStudy), muted: true }] : []),
     { l: '휴식', r: hms(st.brk), muted: true },
     { l: '폰 든 횟수', r: st.upCount + '번', muted: true },
     { l: '앱 나간 횟수', r: st.awayCount + '번', muted: true },
@@ -723,19 +835,41 @@ const ACTIONS = {
   },
   guideDone: () => go(ui.guideFrom === 'settings' ? 'settings' : 'home'),
   pickSubj: s => { db.lastSubject = s; save(); render(); },
+  pickMode: m => {
+    if (m === 'camera' && !db.camIntroSeen) return go('camIntro');
+    db.mode = m === 'camera' ? 'camera' : 'flip'; save(); render();
+  },
+  camIntroOk: () => { db.camIntroSeen = true; db.mode = 'camera'; save(); go(ui.camFrom === 'settings' ? 'settings' : 'home'); },
+  camIntroNo: () => { db.camIntroSeen = true; db.mode = 'flip'; save(); go(ui.camFrom === 'settings' ? 'settings' : 'home'); },
   start: () => {
+    const mode = db.mode === 'camera' ? 'camera' : 'flip';
     const asked = requestSensor();   // iOS는 버튼을 누른 그 순간에 권한을 물어야 한다
     const k = dayKey();
     if (db.closed[k]) { delete db.closed[k]; toast('오늘 마감을 풀었어요'); }
     const now = Date.now();
-    db.active = { subject: currentSubject(), start: now, study: 0, brk: 0, up: 0, upCount: 0, away: [], state: 'waiting', savedAt: now, awayAt: 0 };
+    db.active = { subject: currentSubject(), start: now, study: 0, brk: 0, up: 0, upCount: 0, away: [], state: 'waiting', savedAt: now, awayAt: 0, mode };
+    if (mode === 'camera') Object.assign(db.active, { absentCount: 0, absentMs: 0, drowsyCount: 0, drowsyMs: 0, lapseMs: 4000, lapseCount: 0, lapseBytes: 0 });
     ui.awayPending = 0;
     save();
+    lapse.clear();   // 지난 세션에서 남은 타임랩스 사진은 새 세션을 시작할 때 지운다
+    if (mode === 'camera') cam.start();   // 카메라 권한도 누른 그 순간에 묻는다
     go('timer');
     engine.begin();
     asked.then(() => engine.refresh());
   },
   resume: () => {
+    requestSensor().then(() => engine.refresh());
+    if (db.active && db.active.mode === 'camera') cam.start();
+    engine.begin();
+    renderTimerState();
+  },
+  toFlip: () => {
+    const a = db.active;
+    if (!a) return;
+    cam.stop(); lapse.clear();
+    a.mode = 'flip'; a.state = 'waiting';
+    db.mode = 'flip';
+    save();
     requestSensor().then(() => engine.refresh());
     engine.begin();
     renderTimerState();
@@ -754,15 +888,22 @@ const ACTIONS = {
     ui.endArm = 0;
     engine.tick();
     engine.stop();
+    const isCam = a.mode === 'camera';
+    if (isCam) cam.stop();
     const now = Date.now();
     db.active = null;
     ui.awayPending = 0;
-    if (a.study < 60000) { save(); toast('1분이 안 돼서 저장하지 않았어요'); return go('home'); }
+    ui.lapse = null;
+    if (a.study < 60000) { if (isCam) lapse.clear(); save(); toast('1분이 안 돼서 저장하지 않았어요'); return go('home'); }
     const s = {
       id: now.toString(36), day: dayKey(a.start), subject: a.subject, start: a.start, end: now,
       study: Math.round(a.study), brk: Math.round(a.brk), up: Math.round(a.up), upCount: a.upCount,
-      away: a.away, sensor: sensor.mode === 'on',
+      away: a.away, sensor: isCam || sensor.mode === 'on', mode: isCam ? 'camera' : 'flip',
     };
+    if (isCam) Object.assign(s, {
+      absentCount: a.absentCount || 0, absentMs: Math.round(a.absentMs || 0),
+      drowsyCount: a.drowsyCount || 0, drowsyMs: Math.round(a.drowsyMs || 0),
+    });
     db.sessions.push(s);
     save();
     ui.lastSession = s.id;
@@ -778,6 +919,47 @@ const ACTIONS = {
   closeDay: () => { const k = closeKey(); db.closed[k] = true; ui.shareKey = k; save(); go('share'); },
   openShare: () => { ui.shareKey = closeKey(); go('share'); },
   reopen: () => { delete db.closed[shareKey()]; ui.shareKey = null; save(); go('home'); },
+  lapseMake: async () => {
+    const s = db.sessions.find(x => x.id === ui.lastSession);
+    if (!s || (ui.lapse && ui.lapse.state === 'making')) return;
+    const n = ui.lapse && ui.lapse.n;
+    ui.lapse = { state: 'making', pct: 0, n };
+    render();
+    try {
+      const r = await makeTimelapse(s, p => {
+        if (ui.lapse) ui.lapse.pct = p;
+        const el = document.getElementById('lapsePct');
+        if (el) el.textContent = Math.round(p * 100) + '%';
+      });
+      await lapse.clear();   // 영상을 만들면 사진은 바로 지운다
+      ui.lapse = { state: 'ready', blob: r.blob, ext: r.ext, url: URL.createObjectURL(r.blob) };
+    } catch (e) {
+      console.warn('timelapse', e);
+      if (e && e.message === 'few') { lapse.clear(); ui.lapse = { state: 'few' }; }
+      else ui.lapse = { state: 'fail', n };
+    }
+    if (route === 'done') render();
+  },
+  lapseShare: async () => {
+    const L = ui.lapse, s = db.sessions.find(x => x.id === ui.lastSession);
+    if (!L || !L.blob || !s) return;
+    const name = `eopeodwo-${s.day}.${L.ext}`;
+    const file = new File([L.blob], name, { type: L.blob.type || 'video/mp4' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+      else { downloadBlob(L.blob, name); toast('영상을 저장했어요'); }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      downloadBlob(L.blob, name);
+      toast('공유 창을 못 열어서 파일로 저장했어요');
+    }
+  },
+  lapseDelete: () => { lapse.clear(); ui.lapse = { state: 'deleted' }; render(); },
+  toggleDrowsy: () => {
+    db.settings.drowsy = !db.settings.drowsy;
+    if (ui.draft) ui.draft.drowsy = db.settings.drowsy;
+    save(); render();
+  },
   toggleNick: () => { db.settings.showNick = !db.settings.showNick; save(); render(); },
   shareCard: async () => {
     const blob = ui.cardBlob;
@@ -860,7 +1042,8 @@ app.addEventListener('keydown', e => {
     const a = db.active, now = Date.now();
     const from = a.awayAt || a.savedAt;
     if (from && now - from >= AWAY_MIN_MS && a.state !== 'break') ui.awayPending = now - from;
-    if (a.state === 'counting') a.state = 'up';
+    if (a.mode === 'camera') { if (a.state !== 'break') a.state = 'waiting'; }
+    else if (a.state === 'counting') a.state = 'up';
     a.awayAt = 0;
     sensor.mode = 'unknown';
     route = 'timer';
