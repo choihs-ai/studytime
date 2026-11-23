@@ -159,10 +159,12 @@ const cam = {
     engine.refresh(); this.syncPreview();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return this.fail('nocam');
     try {
+      // 전면 카메라 센서는 4:3이다. 9:16을 달라고 하면 양옆을 잘라서 주니까 4:3으로 받아 화각을 다 쓴다
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 }, frameRate: { ideal: 15, max: 30 } },
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, frameRate: { ideal: 15, max: 30 } },
       });
+      this.zoomOut();
     } catch (e) {
       return this.fail(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'perm' : 'nocam');
     }
@@ -178,6 +180,13 @@ const cam = {
     clearInterval(this.timer);
     this.timer = setInterval(() => this.analyze(), CAMCFG.DETECT_MS);
     engine.refresh(); this.syncPreview();
+  },
+  // 줌을 지원하는 카메라(일부 안드로이드)는 가장 넓게 돌려 둔다
+  zoomOut() {
+    try {
+      const t = this.stream.getVideoTracks()[0], caps = t.getCapabilities ? t.getCapabilities() : {};
+      if (caps.zoom && caps.zoom.min != null) t.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }).catch(() => {});
+    } catch (e) { /* 줌이 없으면 그대로 */ }
   },
   fail(kind) {
     this.status = 'error'; this.errKind = kind;
@@ -461,17 +470,17 @@ const cam = {
     renderTimerState();
   },
 
-  /* 타임랩스 사진 한 장: 세로 720px 안팎, 9:16으로 자른다.
+  /* 타임랩스 사진 한 장: 세로 720px, 카메라 화면 전체.
      미리보기는 거울처럼 보여 주지만 사진은 뒤집지 않는다. 책과 필기 글씨가 바로 보이게 */
   async capture(a) {
     if (this.capturing) return;
     this.capturing = true;
     try {
-      const v = this.video, H = CAMCFG.FRAME_H, W = Math.round(H * 9 / 16);
-      if (!this.fc) { this.fc = document.createElement('canvas'); this.fc.width = W; this.fc.height = H; this.fx = this.fc.getContext('2d'); }
-      const vw = v.videoWidth, vh = v.videoHeight, sc = Math.max(W / vw, H / vh);
-      const dw = vw * sc, dh = vh * sc;
-      this.fx.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      // 카메라가 보는 그대로(자르지 않고) 세로 720px로 줄인다
+      const v = this.video, vw = v.videoWidth, vh = v.videoHeight, H = CAMCFG.FRAME_H, W = Math.round(H * vw / vh);
+      if (!this.fc) { this.fc = document.createElement('canvas'); this.fx = this.fc.getContext('2d'); }
+      if (this.fc.width !== W || this.fc.height !== H) { this.fc.width = W; this.fc.height = H; }
+      this.fx.drawImage(v, 0, 0, W, H);
       const blob = await new Promise(r => this.fc.toBlob(r, 'image/jpeg', 0.72));
       if (!blob || !db.active || db.active.start !== a.start) return;
       const buf = await blob.arrayBuffer();
@@ -496,7 +505,7 @@ const cam = {
 
 /* ---------- 타임랩스 영상 만들기 ---------- */
 
-const VID_W = 720, VID_H = 1280, VID_FPS = 30, END_S = 2.5;
+const VID_W = 720, VID_H = 1280, IMG_H = 960, VID_FPS = 30, END_S = 2.5;
 
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -536,10 +545,11 @@ async function makeTimelapse(session, onProgress) {
       bmp = r ? await createImageBitmap(new Blob([r.buf], { type: 'image/jpeg' })) : null;
       curIdx = idx;
     }
+    // 위쪽 720×960에 카메라 화면 전체를 자르지 않고 넣고, 아래 320px에 타이머를 둔다
     g.fillStyle = '#1C1B19'; g.fillRect(0, 0, VID_W, VID_H);
     if (bmp) {
-      const sc = Math.max(VID_W / bmp.width, VID_H / bmp.height), dw = bmp.width * sc, dh = bmp.height * sc;
-      g.drawImage(bmp, (VID_W - dw) / 2, (VID_H - dh) / 2, dw, dh);
+      const sc = Math.min(VID_W / bmp.width, IMG_H / bmp.height), dw = bmp.width * sc, dh = bmp.height * sc;
+      g.drawImage(bmp, (VID_W - dw) / 2, (IMG_H - dh) / 2, dw, dh);
     }
     const a = recs[idx].study, b = recs[Math.min(recs.length - 1, idx + 1)].study;
     drawOverlay(g, a + (b - a) * (pos - idx), session.subject);
@@ -559,8 +569,8 @@ async function makeTimelapse(session, onProgress) {
 }
 
 function drawOverlay(g, study, subject) {
-  g.fillStyle = 'rgba(28,27,25,0.72)';
-  g.fillRect(0, VID_H - 250, VID_W, 250);
+  g.fillStyle = '#1C1B19';
+  g.fillRect(0, IMG_H, VID_W, VID_H - IMG_H);
   g.textAlign = 'center'; g.textBaseline = 'alphabetic';
   g.fillStyle = '#A8A295'; g.font = '500 32px "IBM Plex Sans KR", sans-serif';
   g.fillText(`${subject} 순공`, VID_W / 2, VID_H - 168);
