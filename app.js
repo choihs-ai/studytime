@@ -28,7 +28,7 @@ function blank() {
   return {
     settings: {
       grade: '고2', subjects: ['국어', '수학', '영어'], goalMin: 360,
-      examName: '', examDate: '', nickname: '', showNick: true, onboarded: false, drowsy: false,
+      examName: '', examDate: '', nickname: '', showNick: true, onboarded: false, drowsy: false, phoneStop: true,
     },
     sessions: [], closed: {}, active: null, lastSubject: null, mode: 'flip', camIntroSeen: false,
   };
@@ -463,6 +463,7 @@ function renderCamState(a, w) {
   else if (st === 'error') msg = (cam.errKind === 'model' ? '얼굴 인식을 불러오지 못했어요.' : cam.errKind === 'perm' ? '카메라 권한이 없어요.' : '카메라를 켜지 못했어요.')
     + ' <b>엎어 두기</b>로 바꿔서 재 주세요.';
   else if (a.state === 'break') msg = '쉬는 시간은 순공에 안 들어가요. 다 쉬면 <b>다시 공부</b>를 눌러요.';
+  else if (a.state === 'up' && cam.phoneUse) msg = '다른 폰을 보고 있어서 멈췄어요. 폰을 치우면 이어서 재요.';
   else if (a.state === 'up') msg = '폰이 움직여서 멈췄어요. 다시 세워 두면 이어서 재요.';
   else if (a.state === 'absent') msg = '자리를 비워서 멈췄어요. 돌아오면 이어서 재요.';
   else if (a.state === 'drowsy') msg = '눈을 오래 감고 있어서 멈췄어요. 눈을 뜨면 이어서 재요.';
@@ -664,6 +665,11 @@ VIEWS.settings = () => {
       <button class="switch ${db.settings.drowsy ? 'on' : ''}" aria-label="졸면 멈추기" aria-pressed="${!!db.settings.drowsy}" data-act="toggleDrowsy"><span></span></button>
     </div>
     <p class="muted" style="font-size:13px;margin:4px 0 12px;line-height:1.6">눈을 10초 넘게 감고 있으면 멈추고 졸음으로 따로 적어요. 고개를 숙이고 있을 때는 판정하지 않아요.</p>
+    <div class="row" style="align-items:center;min-height:44px">
+      <span style="font-size:15px">다른 폰 보면 멈추기</span>
+      <button class="switch ${db.settings.phoneStop !== false ? 'on' : ''}" aria-label="다른 폰 보면 멈추기" aria-pressed="${db.settings.phoneStop !== false}" data-act="togglePhoneStop"><span></span></button>
+    </div>
+    <p class="muted" style="font-size:13px;margin:4px 0 12px;line-height:1.6">새로 집어 든 폰이 3초 넘게 보이면 멈추고 폰 든 횟수에 넣어요. 책상에 놓아 둔 폰은 세지 않아요. 태블릿으로 인강을 듣다가 자꾸 멈추면 꺼 두세요.</p>
     <button class="btn ghost" data-act="go" data-arg="camIntro">세워 두기 안내 다시 보기</button>
     <p class="label">기록</p>
     <button class="btn ghost danger" data-act="resetAll">${ui.resetArm ? '한 번 더 누르면 전부 지워져요' : '기록 전부 지우기'}</button>
@@ -993,6 +999,11 @@ const ACTIONS = {
     if (route === 'done') ui.lapse = { state: 'videoDeleted' };
     toast('영상을 지웠어요');
     render();
+  },
+  togglePhoneStop: () => {
+    db.settings.phoneStop = db.settings.phoneStop === false;
+    if (ui.draft) ui.draft.phoneStop = db.settings.phoneStop;
+    save(); render();
   },
   toggleDrowsy: () => {
     db.settings.drowsy = !db.settings.drowsy;

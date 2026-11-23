@@ -23,6 +23,11 @@ const CAMCFG = {
   SCENE_STILL: 0.15,       // 바로 앞 장과 비교해 이 비율 밑이면 가만히 있는 것
   EYE_MIN: 0.6, EYE_MAX: 0.85, EYE_MARGIN: 0.3,
   PITCH_OFF_DEG: 15,       // 고개를 이만큼 숙이거나 들면 졸음 판정을 쉰다
+  PHONE_MS: 1000,          // 다른 폰 찾기는 초당 1번
+  PHONE_SCORE: 0.35,
+  PHONE_MAX_W: 0.45,       // 화면 폭의 이 비율보다 크면 태블릿이나 모니터로 보고 뺀다
+  PHONE_REST_MS: 20000,    // 같은 자리에 이만큼 가만히 있으면 책상에 놓아 둔 폰
+  PHONE_LEARN_MS: 8000,    // 시작하고 이 동안 보이는 폰은 원래 놓여 있던 폰
   FRAME_MS: 4000,          // 타임랩스 사진 간격(처음)
   FRAME_H: 720,
   MAX_FRAMES: 1800,        // 30초 영상에는 900장이면 충분하다. 넘으면 한 장씩 건너 지운다
@@ -130,6 +135,7 @@ const cam = {
     if (!a) return '';
     if (this.status !== 'on') return '카메라 켜는 중';
     if (a.state === 'break') return '쉬는 중';
+    if (this.phoneUse) return '폰 보는 중';
     if (a.state === 'up' || this.lifted) return '폰 움직임';
     if (!this.calibrated) return '자리 잡는 중';
     if (this.faceVisible) {
@@ -150,6 +156,7 @@ const cam = {
     this.eyeCal = []; this.eyeBase = null; this.pitchBase = null; this.closedSince = 0; this.closedStudy = 0;
     this.lastLm = 0; this.lastFrameAt = now; this.lastDetect = 0;
     this.sceneFrac = 0; this.stillFrac = 1;
+    this.phones = []; this.phoneHits = []; this.phoneUse = false; this.lastOd = 0; this.odLearnUntil = 0;
   },
   async start() {
     this.ensureDom();
@@ -173,6 +180,7 @@ const cam = {
     try { await this.video.play(); } catch (e) { /* autoplay 속성으로 다시 시도된다 */ }
     try { await this.loadDetector(); } catch (e) { console.warn('detector', e); this.stopStream(); return this.fail('model'); }
     if (db.settings.drowsy) this.loadLandmarker();
+    if (db.settings.phoneStop !== false) this.loadOd();
     if (window.VideoEncoder) fetch(MUXER_SRC).catch(() => {});   // 오프라인에서도 타임랩스를 만들 수 있게 미리 받아 둔다
     if (!db.active || db.active.mode !== 'camera') { this.stopStream(); return; }
     this.status = 'on';
@@ -241,6 +249,18 @@ const cam = {
       });
     })().catch(e => { console.warn('landmarker', e); this.lmLoading = null; });
     return this.lmLoading;
+  },
+
+  loadOd() {
+    if (this.od || this.odLoading) return this.odLoading;
+    this.odLoading = (async () => {
+      await this.loadVision();
+      this.od = await this.vision.ObjectDetector.createFromOptions(this.fileset, {
+        baseOptions: { modelAssetPath: abs(VENDOR + '/models/efficientdet_lite2.tflite'), delegate: 'CPU' },
+        runningMode: 'VIDEO', scoreThreshold: CAMCFG.PHONE_SCORE, maxResults: 5, categoryAllowlist: ['cell phone'],
+      });
+    })().catch(e => { console.warn('object detector', e); this.odLoading = null; });
+    return this.odLoading;
   },
 
   /* 기울기 */
@@ -381,6 +401,10 @@ const cam = {
       }
     }
 
+    // 3) 다른 폰
+    if (db.settings.phoneStop !== false) this.checkPhone(now, t);
+    else { this.phoneUse = false; this.phoneHits = []; }
+
     // 3) 졸음(실험)
     if (db.settings.drowsy) this.checkEyes(now, t, a);
     else this.closedSince = 0;
@@ -393,6 +417,61 @@ const cam = {
 
     engine.refresh();
     this.syncPreview();
+  },
+
+  /* 다른 폰: 새로 나타나거나 움직이는 폰이 최근 5초 중 3번 넘게 보이면 딴짓으로 본다.
+     시작할 때부터 있던 폰과 20초 넘게 같은 자리에 가만히 있는 폰(책상에 놓아 둔 폰)은 뺀다 */
+  checkPhone(now, t) {
+    if (!this.od) { this.loadOd(); return; }
+    if (now - this.lastOd < CAMCFG.PHONE_MS) return;
+    this.lastOd = now;
+    if (!this.odLearnUntil) this.odLearnUntil = now + CAMCFG.PHONE_LEARN_MS;
+    const v = this.video, k = 448 / Math.max(v.videoWidth, v.videoHeight);
+    const w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    if (!this.oc) { this.oc = document.createElement('canvas'); this.ox = this.oc.getContext('2d'); }
+    if (this.oc.width !== w || this.oc.height !== h) { this.oc.width = w; this.oc.height = h; }
+    this.ox.drawImage(v, 0, 0, w, h);
+    let dets = [];
+    try {
+      const r = this.od.detectForVideo(this.oc, Math.max(t, (this.lastOdT || 0) + 1));
+      this.lastOdT = Math.max(t, (this.lastOdT || 0) + 1);
+      dets = ((r && r.detections) || [])
+        .filter(d => d.categories[0] && d.categories[0].categoryName === 'cell phone' && d.categories[0].score >= CAMCFG.PHONE_SCORE)
+        .map(d => ({ x: d.boundingBox.originX / w, y: d.boundingBox.originY / h, w: d.boundingBox.width / w, h: d.boundingBox.height / h }))
+        .filter(b => b.w <= CAMCFG.PHONE_MAX_W);
+    } catch (e) { console.warn('phone', e); return; }
+    const iou = (a, b) => {
+      const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y), x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
+      const i = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+      return i / (a.w * a.h + b.w * b.h - i || 1);
+    };
+    const learning = now < this.odLearnUntil;
+    let active = false;
+    for (const b of dets) {
+      let tr = null, best = 0.3;
+      for (const p of this.phones) { const o = iou(b, p.box); if (o > best) { best = o; tr = p; } }
+      if (!tr) {
+        tr = { anchor: b, anchorAt: now, rest: learning };
+        this.phones.push(tr);
+      } else {
+        const moved = Math.abs((b.x + b.w / 2) - (tr.anchor.x + tr.anchor.w / 2)) > 0.02
+          || Math.abs((b.y + b.h / 2) - (tr.anchor.y + tr.anchor.h / 2)) > 0.02
+          || Math.abs(b.w * b.h / (tr.anchor.w * tr.anchor.h) - 1) > 0.15;
+        if (moved) { tr.anchor = b; tr.anchorAt = now; tr.rest = learning; }
+        else if (now - tr.anchorAt >= CAMCFG.PHONE_REST_MS) tr.rest = true;
+      }
+      tr.box = b; tr.seen = now;
+      if (!tr.rest) active = true;
+    }
+    this.phones = this.phones.filter(p => now - p.seen < 60000);
+    // 감지가 들쭉날쭉해도 깜빡이지 않게: 최근 5번 중 3번 보이면 켜고, 5번 내리 안 보이면 끈다
+    this.phoneHits.push(active);
+    if (this.phoneHits.length > 5) this.phoneHits.shift();
+    const hits = this.phoneHits.filter(Boolean).length;
+    if (!this.phoneUse && hits >= 3) this.phoneUse = true;
+    else if (this.phoneUse && hits === 0 && this.phoneHits.length >= 5) this.phoneUse = false;
+    // 내려놓고 20초 가만히 두면 바로 끈다
+    if (this.phoneUse && !active && dets.length && this.phones.every(p => p.rest || now - p.seen > 3000)) { this.phoneUse = false; this.phoneHits = []; }
   },
 
   checkEyes(now, t, a) {
@@ -437,7 +516,7 @@ const cam = {
     const prev = a.state, now = Date.now();
     let next = prev;
     if (this.status !== 'on' || !this.calibrated) next = this.lifted ? 'up' : 'waiting';
-    else if (this.lifted) next = 'up';
+    else if (this.lifted || this.phoneUse) next = 'up';
     else if (prev === 'counting') {
       if (!this.faceVisible && this.lastFaceAt && now - this.lastFaceAt > CAMCFG.ABSENT_MS) next = 'absent';
       else if (db.settings.drowsy && this.closedSince && now - this.closedSince > CAMCFG.DROWSY_MS) next = 'drowsy';

@@ -10,11 +10,12 @@
 | `mediapipe-1.2.2/wasm/` | 같은 패키지의 `vision_wasm_internal.js/.wasm` | 위와 같음 | Apache-2.0 |
 | `mediapipe-1.2.2/models/blaze_face_short_range.tflite` | 얼굴 감지 모델 | `storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/` | Apache-2.0 (MediaPipe 모델 카드) |
 | `mediapipe-1.2.2/models/face_landmarker.task` | 얼굴 랜드마크·눈 감음 점수 모델 (졸면 멈추기) | `storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/` | Apache-2.0 (MediaPipe 모델 카드) |
+| `mediapipe-1.2.2/models/efficientdet_lite2.tflite` | 사물 감지 모델(int8). '다른 폰 보면 멈추기'에서 cell phone만 본다 | `storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/` | Apache-2.0 (MediaPipe 모델 카드) |
 | `mp4-muxer-5.2.2/mp4-muxer.js` | WebCodecs 출력을 mp4로 묶는 먹서 | npm `mp4-muxer@5.2.2` `build/mp4-muxer.js` | MIT (`mp4-muxer-5.2.2/LICENSE`) |
 
 ## vision_bundle.mjs를 고친 곳
 
-원본은 모든 작업(FaceDetector, FaceLandmarker)마다 사용 통계를 1분에 한 번 `https://odml.pa.googleapis.com/v1/log`로 보내요.
+원본은 모든 작업(FaceDetector, FaceLandmarker, ObjectDetector)마다 사용 통계를 1분에 한 번 `https://odml.pa.googleapis.com/v1/log`로 보내요.
 끄는 옵션이 없어서 두 군데를 고쳤어요. 나머지는 원본 그대로예요.
 
 1. 통계 전송기(`Ih` 클래스) 생성자에서 1분 타이머를 만들지 않고 처음부터 오류 상태로 둬요. 그러면 기록을 쌓지도 보내지도 않아요.
