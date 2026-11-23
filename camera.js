@@ -26,7 +26,6 @@ const CAMCFG = {
   PHONE_MS: 1000,          // 다른 폰 찾기는 초당 1번
   PHONE_SCORE: 0.35,
   PHONE_MAX_W: 0.45,       // 화면 폭의 이 비율보다 크면 태블릿이나 모니터로 보고 뺀다
-  PHONE_REST_MS: 20000,    // 같은 자리에 이만큼 가만히 있으면 책상에 놓아 둔 폰
   PHONE_LEARN_MS: 8000,    // 시작하고 이 동안 보이는 폰은 원래 놓여 있던 폰
   FRAME_MS: 4000,          // 타임랩스 사진 간격(처음)
   FRAME_H: 720,
@@ -419,8 +418,10 @@ const cam = {
     this.syncPreview();
   },
 
-  /* 다른 폰: 새로 나타나거나 움직이는 폰이 최근 5초 중 3번 넘게 보이면 딴짓으로 본다.
-     시작할 때부터 있던 폰과 20초 넘게 같은 자리에 가만히 있는 폰(책상에 놓아 둔 폰)은 뺀다 */
+  /* 다른 폰: 새로 나타나거나 움직인 폰이 최근 5초 중 3번 넘게 보이면 딴짓으로 본다.
+     시작할 때부터 가만히 놓여 있던 폰만 뺀다. 그 폰도 움직이면 그때부터 센다.
+     한 번 센 폰은 가만히 있어도 화면에 보이는 동안 계속 멈춘다. 손에 들고 가만히 영상을 보는 게 제일 흔한 딴짓이라서.
+     다시 재는 건 폰이 화면에서 사라질 때(치우거나 엎어 둘 때)뿐이다 */
   checkPhone(now, t) {
     if (!this.od) { this.loadOd(); return; }
     if (now - this.lastOd < CAMCFG.PHONE_MS) return;
@@ -457,8 +458,7 @@ const cam = {
         const moved = Math.abs((b.x + b.w / 2) - (tr.anchor.x + tr.anchor.w / 2)) > 0.02
           || Math.abs((b.y + b.h / 2) - (tr.anchor.y + tr.anchor.h / 2)) > 0.02
           || Math.abs(b.w * b.h / (tr.anchor.w * tr.anchor.h) - 1) > 0.15;
-        if (moved) { tr.anchor = b; tr.anchorAt = now; tr.rest = learning; }
-        else if (now - tr.anchorAt >= CAMCFG.PHONE_REST_MS) tr.rest = true;
+        if (moved) { tr.anchor = b; tr.anchorAt = now; if (!learning) tr.rest = false; }
       }
       tr.box = b; tr.seen = now;
       if (!tr.rest) active = true;
@@ -470,8 +470,6 @@ const cam = {
     const hits = this.phoneHits.filter(Boolean).length;
     if (!this.phoneUse && hits >= 3) this.phoneUse = true;
     else if (this.phoneUse && hits === 0 && this.phoneHits.length >= 5) this.phoneUse = false;
-    // 내려놓고 20초 가만히 두면 바로 끈다
-    if (this.phoneUse && !active && dets.length && this.phones.every(p => p.rest || now - p.seen > 3000)) { this.phoneUse = false; this.phoneHits = []; }
   },
 
   checkEyes(now, t, a) {

@@ -463,7 +463,7 @@ function renderCamState(a, w) {
   else if (st === 'error') msg = (cam.errKind === 'model' ? '얼굴 인식을 불러오지 못했어요.' : cam.errKind === 'perm' ? '카메라 권한이 없어요.' : '카메라를 켜지 못했어요.')
     + ' <b>엎어 두기</b>로 바꿔서 재 주세요.';
   else if (a.state === 'break') msg = '쉬는 시간은 순공에 안 들어가요. 다 쉬면 <b>다시 공부</b>를 눌러요.';
-  else if (a.state === 'up' && cam.phoneUse) msg = '다른 폰을 보고 있어서 멈췄어요. 폰을 치우면 이어서 재요.';
+  else if (a.state === 'up' && cam.phoneUse) msg = '다른 폰을 보고 있어서 멈췄어요. 폰을 치우거나 엎어 두면 이어서 재요.';
   else if (a.state === 'up') msg = '폰이 움직여서 멈췄어요. 다시 세워 두면 이어서 재요.';
   else if (a.state === 'absent') msg = '자리를 비워서 멈췄어요. 돌아오면 이어서 재요.';
   else if (a.state === 'drowsy') msg = '눈을 오래 감고 있어서 멈췄어요. 눈을 뜨면 이어서 재요.';
@@ -669,7 +669,7 @@ VIEWS.settings = () => {
       <span style="font-size:15px">다른 폰 보면 멈추기</span>
       <button class="switch ${db.settings.phoneStop !== false ? 'on' : ''}" aria-label="다른 폰 보면 멈추기" aria-pressed="${db.settings.phoneStop !== false}" data-act="togglePhoneStop"><span></span></button>
     </div>
-    <p class="muted" style="font-size:13px;margin:4px 0 12px;line-height:1.6">새로 집어 든 폰이 3초 넘게 보이면 멈추고 폰 든 횟수에 넣어요. 책상에 놓아 둔 폰은 세지 않아요. 태블릿으로 인강을 듣다가 자꾸 멈추면 꺼 두세요.</p>
+    <p class="muted" style="font-size:13px;margin:4px 0 12px;line-height:1.6">다른 폰을 집어 들면 멈추고 폰 든 횟수에 넣어요. 화면 밖으로 치우거나 엎어 두면 다시 재요. 시작할 때부터 책상에 놓여 있던 폰은 건드리기 전까지 세지 않아요. 태블릿으로 인강을 듣다가 자꾸 멈추면 꺼 두세요.</p>
     <button class="btn ghost" data-act="go" data-arg="camIntro">세워 두기 안내 다시 보기</button>
     <p class="label">기록</p>
     <button class="btn ghost danger" data-act="resetAll">${ui.resetArm ? '한 번 더 누르면 전부 지워져요' : '기록 전부 지우기'}</button>

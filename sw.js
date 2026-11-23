@@ -1,6 +1,6 @@
 // 앱 파일은 네트워크 우선(새 버전이 바로 반영되게), 글꼴은 캐시 우선
 // vendor/(얼굴 인식 모델·영상 먹서)는 버전이 경로에 들어 있어서 캐시 우선. 세워 두기를 처음 켤 때 받아 둔다
-const CACHE = 'eopeodwo-v6';
+const CACHE = 'eopeodwo-v7';
 const VENDOR_CACHE = 'eopeodwo-vendor-mp122-mux522';
 const CORE = ['./', 'index.html', 'style.css', 'app.js', 'camera.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
