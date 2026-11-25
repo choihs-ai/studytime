@@ -4,7 +4,7 @@
   --sans:'IBM Plex Sans KR',-apple-system,'Apple SD Gothic Neo',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
 }
-*{box-sizing:border-box}
+*{box-sizing:border-box;touch-action:manipulation}   /* 두 번 탭해도 확대되지 않게. 두 손가락 확대는 그대로 둔다 */
 html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 body{min-height:100dvh}
 button,input{font:inherit;color:inherit}
